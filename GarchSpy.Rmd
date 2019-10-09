@@ -1,0 +1,451 @@
+---
+title: "Time Series Analysis for Two Separate Periods of Microsoft Closing Stock Price Data"
+output:
+  word_document: default  
+  html_document: default
+---
+
+```{r setup, include=FALSE, message=FALSE}
+library(TSA, quietly = T)
+library(tseries, quietly = T)
+library(aTSA, quietly = T)
+library(knitr, quietly = T)
+library(forecast, quietly = T)
+
+detach("package:tseries", unload=TRUE)
+
+library(ggplot2)
+library(dplyr)
+
+#install.packages('tseries')
+#install.packages('RColorBrewer')
+#install.packages('hrbrthemes')
+#install.packages('rugarch')
+
+#install.packages("quantmod")
+#install.packages("lattice")
+
+library(quantmod)
+library(lattice)
+library(zoo)
+
+library(plotrix)
+library(RColorBrewer)
+library(hrbrthemes)
+
+library(rugarch)
+```
+
+
+# **1. Getting and Analyzing the Data**
+
+I enjoy working in finance, and I have been using different technologies to provide engineering and software solutions to the financial sector for over a decade. I have been invested in Microsoft for quite some time, and am familiar with not only the company and its history, but also its stock performance as well. 
+
+I picked two datasets that represent quite different aspects of both where Microosft was as a compnay, but how the financial markets were as well. In 2012-2013 Micorosft (MSFT) was losing massive ground to Apple, its path forward was very unclear at best, and the Great Recession was still a cloud which loomed large over the minds of traders. In 2017-2018, MSFT could do no wrong, it because the largest company in the world, and the markets were booming.
+
+The initial question I want to ask, and explain with this analysis is: Given the disparity in times, circumstances, and more, can the same time series model be used to evaluate both datasets?
+
+```{r ExamineData, message=FALSE}
+spyHistoricalData <- read.csv("C:/Users/jeffr/OneDrive/Documents/School/Thesis/SPY.csv", nrows = 1000)  #, nrows = 1000
+
+spyClosingPrice <- spyHistoricalData$AdjClose
+spyDates <- as.Date(spyHistoricalData$Date, format="%m/%d/%Y")
+timeSeries <- ts(spyHistoricalData$AdjClose, frequency=252)
+
+spyHistoricalData %>% 
+ggplot(aes(x=spyDates, y=spyClosingPrice)) +
+    geom_line(color="#69b3a2") +
+    ylim(0,300) +
+    ggtitle("Closing Price of SPY 1993 - 2019") +
+    ylab("Price in $") + xlab("Date") +
+    annotate(geom="text", x=as.Date("2002-10-07"), y=25, label="Low of \n Dot Com Bubble") +
+    annotate(geom="point", x=as.Date("2002-10-07"), y=56.55, size=7, shape=21, fill="transparent") +
+    annotate(geom="text", x=as.Date("2009-03-09"), y=25, label="Low of \n Great Recession") +
+    annotate(geom="point", x=as.Date("2009-03-09"), y=54.78, size=7, shape=21, fill="transparent") +
+    #geom_hline(yintercept=5000, color="orange", size=.5) 
+    theme(
+      plot.title = element_text(size=16, face="bold",hjust = 0.5),
+      axis.title.x = element_text(size=13, face="italic", hjust = 0.2),
+      axis.title.y = element_text(size=13, face="italic")
+    ) +
+    scale_x_date(date_labels ="%m/%Y", breaks = "3 years")  #%Y-%m-%d
+
+```
+
+## **Decomposition**
+
+We can clearly see from here there is a trend compnonent, but no seasonality to both of the time series. Given what is known about stock data and Microsoft during these time periods in particular, this is expected.
+
+```{r DecomposeData, echo=FALSE, message=FALSE}
+decomp = stl(timeSeries,s.window="periodic")
+plot(decomp)
+```
+
+## **ACF/PACF**
+
+Initial looks at the ACF and PACF plots for both of the time series, as expected, is showing high autocorrelation. This is a sign as well that the data needs to be made stationary. 
+
+```{r AcfPacf Init, echo=FALSE, message=FALSE}
+#timeSeries <- ts(spyHistoricalData$AdjClose, frequency=251)
+TSA::acf(timeSeries)
+pacf(timeSeries)
+```
+
+# **2. Making it Stationary**
+
+This part is a bit unexpected for me. Looking at the plot of the differenced data, it looks like the data has been made stationary. Looking at the ACF and PACF plot revealed the surprised. It seems to fit neither an AR or MA model. I guess I had just assumed that it would be an AR model. Also, maybe it fights my natural instinct that this data is a random walk.
+
+It seems for sure this segment of the MSFT close data does not look like what we saw previously. For sure, there is a not a constant variance, and in fact, it does seem to be a bit of volitility clustering. However, let's do a little more digging before I jump to any conclusions.
+
+The ACF and PACF of the differenced data do show this may benefit from an AR(2) and an MA(2) model
+```{r AcfPacf Round 2, echo=FALSE, message=FALSE}
+#stationaryData <- diff(sqrt(timeSeries))
+head(spyDf)
+print ((closingPrices - lag(closingPrices, n=1)))
+
+print(closingPrices[1])
+print(closingPrices[2])
+print(lag(closingPrices, n=1)[1])
+
+spyClosingPrice <- spyHistoricalData$AdjClose
+spyDates <- as.Date(spyHistoricalData$Date, format="%m/%d/%Y")
+spyDf <- data.frame(spyDates, spyClosingPrice)
+
+
+closingPrices <- spyHistoricalData$AdjClose
+spyPctChange <- (closingPrices - lag(closingPrices, n=1))/closingPrices
+spyPctChange <- na.omit(spyPctChange)
+stationaryTimeSeries <- ts(spyPctChange, frequency=250)#stationaryData, spyPctChange
+
+spyDf$pctChange <- (spyDf$spyClosingPrice - lag(spyDf$spyClosingPrice, n=1))/spyDf$spyClosingPrice
+spyDf <- na.omit(spyDf)
+
+plot(stationaryTimeSeries, main = "2012 - 2013 Microsoft Stock Closing Price Diff Lag 1")
+
+acf(stationaryTimeSeries)
+pacf(stationaryTimeSeries)
+
+qqnorm(stationaryTimeSeries, pch = 1, frame = FALSE)
+qqline(stationaryTimeSeries, col = "steelblue", lwd = 2)
+```
+
+With only differencing by lag of 1, we were able to make both time series stationary. I was perhaps thinking of going a bit further with the 2017-2018 MSFT data because of what I was seeing in the volatilty, however, less is definitely more with transformations, so I want to keep it to a minimum.
+
+```{r Stationarity, echo=FALSE, message=FALSE}
+aTSA::adf.test(stationaryTimeSeries,output=TRUE)
+```
+
+Doing a quick analysis of the models suggested by the ACF an PACF anysis of both datasets. The models to appear to be descent fits for their respective models. I do want to point out however, the random walk does appear to be a better fit. The ARIMA(2,1,2) model for the 2017-2018 dataset does not fit the data as well.
+
+# **3. Modeling and Evaluating**
+
+Dickey-Fuller tests on both datasets to ensure the data is stationary.
+```{r FittingModels, echo=FALSE, message=FALSE}
+model <- arima(stationaryTimeSeries, c(1, 0, 1))
+```
+
+Looking at the auto arima functions, we can see that it pretty much agreed with the analysis that I did manually using the ACF and PACF. So 2012 - 2013 data seems to be indeed a random walk, and the 2017-2018 data appears to be an ARIMA(3,1,3) with drift rather than an ARIMA (2,1,2).
+```{r Evalution, echo=FALSE, message=FALSE}
+model <- auto.arima(stationaryTimeSeries)
+summary(model)
+```
+We find white noise in residuals
+```{r Model Evalution, echo=FALSE, message=FALSE}
+plot(model$residuals, main = "Residuals fo ARIMA Model")
+
+TSA::acf(model$residuals)
+pacf(model$residuals)
+
+qqnorm(model$residuals, pch = 1, frame = FALSE)
+qqline(model$residuals, col = "steelblue", lwd = 2)
+
+```
+
+```{r Model Evalution 2, echo=FALSE, message=FALSE}
+squaredResiduals = model$residuals**2
+plot(squaredResiduals**2, main = "Squared Residuals of the ARIMA model")
+
+acf(squaredResiduals)
+pacf(squaredResiduals)
+
+qqnorm(squaredResiduals, pch = 1, frame = FALSE)
+qqline(squaredResiduals, col = "steelblue", lwd = 2)
+
+#gBox(model, lags = 1:2, x, method = c("squared", "absolute")[1], plot = TRUE)
+```
+
+
+
+All the estimates using AIC seem to be fairly close, and given that I would like to select the simplest model Indeed, a Random Walk appears to be the winner here.
+
+Similar to the resuts above, however, while the anylsis suggests that an ARIMA(3,1,3), its seems to be very close to an ARIMA(1,1,1). If so, an ARIMA(1,1,1) would be prefferable. However, I'm now thinking maybe also try a Random Walk here.
+```{r Evalution AIC Table, echo=FALSE, message=FALSE}
+
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+       table[p+1,q+1] <- arima(data,order=c(p,0,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("<b> AR",0:P, "</b>", sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+```
+
+
+AIC of 2012 - 203 MSFT using different ARIMA parameters
+```{r Aic1, echo=FALSE, message=FALSE}
+table <- aic_table(stationaryTimeSeries,3,3)
+require(knitr)
+kable(table, digits = 2)
+```
+
+
+```{r}
+#garchModel <- tseries::garch(stationaryData, order = c(1, 1))
+#garchModel <- tseries::garch(stationaryData, order = c(0, 1))
+
+#summary(garchModel)
+
+#garchResiduals <- na.omit(garch1@fit$residuals)  #na.omit(garchModel$residuals)
+#plot(garchResiduals, type = 'l')
+
+#acf(garchResiduals)
+#pacf(garchResiduals)
+
+#qqnorm(garchResiduals, pch = 1, frame = FALSE)
+#qqline(garchResiduals, col = "steelblue", lwd = 2)
+#print(stationaryData)
+#############
+spec = ugarchspec(variance.model = list(model = 'sGARCH', garchOrder = c(1, 1)), mean.model = list(armaOrder = c(0, 0), include.mean=TRUE), distribution.model = 'std')
+
+garch1 <- ugarchfit(spec = spec, data = spyDf$pctChange)  #stationaryData, spyPctChange
+
+acf(garch1@fit$residuals)
+pacf(garch1@fit$residuals)
+spec$residuals
+
+show(garch1)
+
+plot(garch1) #, which = 'all')
+
+plot(garch1@fit$residuals**2, type = "l")
+lines(garch1@fit$var, col = "green")
+
+plot(garch1@fit$var, type = "l", xaxt='n')
+axis(1, seq(0,1000, 20))
+grid (49,NULL, lty = 6)
+
+plot(spyClosingPrice, type = "l", xaxt='n')
+axis(1, seq(0,1000, 20))
+grid (49,NULL, lty = 6)
+
+```
+
+
+```{r CREATE FORECAST, echo=FALSE, message=FALSE}
+spec = ugarchspec(variance.model=list(model = 'sGARCH', garchOrder=c(1,1)),
+        mean.model=list(armaOrder=c(1, 1), include.mean=T),
+        distribution.model="std")
+
+g <- ugarchfit(spec, spyDf$pctChange)
+#g <- ugarchfit(spec, spyPctChange, solver.control = list(tol = 1e-12), solver = 'hybrid') #stationaryData, spyPctChange
+#is(g, "warning")
+head(g@fit$hessian)
+head (fore@forecast$sigmaFor)
+fore = ugarchforecast(g, n.ahead=1)
+ind = fore@forecast$seriesFor
+
+windowLength = 500
+forecastLength = nrow(spyHistoricalData) - windowLength
+forecasts <- vector(mode="character", length=forecastLength)
+
+for (d in 0:forecastLength) {
+    # Obtain the S&P500 rolling window for this day
+    spyReturnsOffset = spyPctChange[(1+d):(windowLength+d)]
+
+    # Fit the ARIMA model
+    final.aic <- Inf
+    final.order <- c(0,0,0)
+    for (p in 0:2) for (q in 0:2) {
+        if ( p == 0 && q == 0) {
+            next
+        }
+
+        arimaFit = tryCatch( arima(spyReturnsOffset, order=c(p, 0, q)),
+                             error=function( err ) FALSE,
+                             warning=function( err ) FALSE )
+
+        if( !is.logical( arimaFit ) ) {
+            current.aic <- AIC(arimaFit)
+            if (current.aic < final.aic) {
+                final.aic <- current.aic
+                final.order <- c(p, 0, q)
+                final.arima <- arima(spyReturnsOffset, order=final.order)
+            }
+        } else {
+            next
+        }
+    }
+
+    # Specify and fit the GARCH model
+    spec = ugarchspec(
+        variance.model=list(model = 'sGARCH', garchOrder=c(1,1)),
+        mean.model=list(armaOrder=c(final.order[1], final.order[3]), include.mean=T),
+        distribution.model="std"
+    )
+    fit = tryCatch(ugarchfit(spec, spyReturnsOffset, solver = 'hybrid'), error=function(e) e, warning=function(w) w)
+    
+    # If the GARCH model does not converge, set the direction to "long" else
+    # choose the correct forecast direction based on the returns prediction
+    # Output the results to the screen and the forecasts vector
+    if(is(fit, "warning")) {
+      forecasts[d+1] = paste(index(spyReturnsOffset[windowLength]), 1, sep=",")
+      print(paste(index(spyReturnsOffset[windowLength]), 1, sep=","))
+      print('BAD')
+    } else {
+      fore = ugarchforecast(fit, n.ahead=1)
+      ind = fore@forecast$seriesFor
+      forecasts[d+1] = paste(colnames(ind), ifelse(ind[1] < 0, -1, 1), sep=",")
+      print(paste(colnames(ind), ifelse(ind[1] < 0, -1, 1), sep=",")) 
+    }
+}                
+
+
+
+index(spyReturnsOffset[10])
+
+
+
+```
+
+
+```{r GARCH, echo=FALSE, message=FALSE}
+#garchSquaredResiduals <- na.omit(garchModel$residuals)**2
+garchSquaredResiduals <- na.omit(garch1@fit$residuals)**2
+
+plot(garchSquaredResiduals, type = 'l')
+
+acf(garchSquaredResiduals, lag.max = 30)
+pacf(garchSquaredResiduals)
+
+qqnorm(garchSquaredResiduals, pch = 1, frame = FALSE)
+qqline(garchSquaredResiduals, col = "steelblue", lwd = 2)
+
+# gBox(garchModel, method = 'squared')
+# gBox(garchModel, method = 'absolute')
+# 
+# acf(abs(garchResiduals))
+# pacf(abs(garchResiduals))
+
+```
+
+
+# **4. Forecasting**
+
+msft2014TimeSeries <- ts(msft2014, frequency=250, start=c(3,1)) 
+
+rme_table <- function(trainingTimeSeries, testTimeSeries, P, Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P) {
+    for(q in 0:Q) {
+      trainingModel <- arima(trainingTimeSeries, order = c(p,1,q))
+      predictedValues <- predict(trainingModel, n.ahead = 5)$pred
+      trainingModel$x <- trainingTimeSeries
+      forecast <- forecast::forecast(trainingModel, h = 5)
+      rme <- accuracy(predictedValues,testTimeSeries)[2]
+      print(rme)
+      table[p+1,q+1] <- rme
+    }
+  }
+  dimnames(table) <- list(paste("<b> AR",0:P, "</b>", sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+```
+
+Above, I put together a table that displayed the AIC for each of the models for each dataset. This was one way to show possible which model would be a good fit for the data. However, here I created a table to see how accurate the different ARIMA models forecast the data. We can compare this table to the AIC table.
+
+So interesting. While analysis showed that a random walk was a best fir for the data, do remember that the table I created showed that the random walk and multiple ARIMA models were all fairly close in AIC. Actually forecasting the 2014 data, and ARIM(2,1,2) model is cleary the winner.
+
+Forecast Accuracy of different ARIMA parameters on MSFT 2012 - 2013 data 
+```{r 2012 Forecast Table, echo=FALSE, message=FALSE}
+table <- rme_table(msft2012TimeSeries, msft2014TimeSeries, 3, 3)
+require(knitr)
+kable(table, digits = 2)
+```
+
+Interestingly enough the ARIMA(1,1,1) model forecasts the data the best. In the ACP/PACF analysis above, the ARIMA(2,1,2) was the best fit, but I had mentioned since the numbers were close, my preference for ARIMA(1,1,1) to keep the model a bit simpler. Notice the random walk is not too far off.
+
+Forecast Accuracy of different ARIMA parameters on MSFT 2017 - 2018 data 
+```{r 2017 Forecast Table, echo=FALSE, message=FALSE}
+table <- rme_table(msft2017TimeSeries, msft2019TimeSeries, 3, 3)
+require(knitr)
+kable(table, digits = 2)
+```
+
+```{r 2012 Forecast Plot, echo=FALSE, message=FALSE}
+trainingModel <- arima(msft2012TimeSeries, order = c(2,1,2))
+model2012 <- trainingModel
+predictedValues <- predict(trainingModel, n.ahead = 5)$pred
+trainingModel$x <- msft2012TimeSeries
+forecast <- forecast::forecast(trainingModel, h=5)
+
+plot(forecast, xlim = c(2.8, 3.01), ylim = c(34,40)) 
+lines(msft2014TimeSeries)
+
+plot(forecast, main = "Microsoft Stock Price in 2017 - 2018 & Forecast 2019", type="l", col = "red", lwd = 2, ylab = "Price in $", xlab = "Date", xlim = c(2.7, 3.02), xaxt="n", ylim = c(32,41)) 
+lines(msft2014TimeSeries, col = "green", lwd=2)
+legend(2.7, 41, legend=c("Stock Prices 2017-2018 (Train)", "Sotck Prices 2019 (Test)","Forecasted Price"), col=c("red", "green", "blue"), lwd=2,  cex=0.8, box.lty=0, text.font = 4)
+axis(1, at=c(2.70, 2.75, 2.8, 2.85, 2.9, 2.95, 3.0),        
+     labels=c("7/01/2013","8/01/2013","9/01/2013","10/01/2013", "11/01/2013","12/01/2013","1/01/2014"), las = 1, cex.axis = 1)
+
+plot(forecast, main = "Microsoft Stock Price in 2012 - 2013 & Forecast 2014", type="l", col = "red", lwd = 2, ylab = "Price in $", xlab = "Date", xlim = c(2.95, 3.015), xaxt="n", ylim = c(35,39)) 
+lines(msft2014TimeSeries, col = "green", lwd=2)
+legend(2.95, 39, 
+       legend=c("Stock Prices 2012-2013 (Train)", "Stock Prices 2014 (Test)","Forecasted Price" ), 
+       col=c("red", "green", "blue"), lwd=2,  cex=0.8, box.lty=0, text.font = 4)
+axis(1, at=c(2.95, 2.96, 2.97, 2.98, 2.99, 3.0, 3.01),        
+     labels=c("12/24/2013","12/26/2013","12/29/2013","12/30/2013","12/31/2013","1/1/2014","1/2/2014"), las = 1, cex.axis      = 1)
+```
+
+```{r 2017 Forecast Plot, echo=FALSE, message=FALSE}
+
+model2017 <- auto.arima(msft2017TimeSeries)
+summary(model2017)
+
+trainingModel <- arima(msft2017TimeSeries, order = c(2,1,2))
+model2017 <- trainingModel
+predictedValues <- predict(trainingModel, n.ahead = 5)$pred
+trainingModel$x <- msft2017TimeSeries
+forecast <- forecast::forecast(trainingModel, h = 5)
+
+plot(forecast, main = "Microsoft Stock Price in 2017 - 2018 & Forecast 2019", type="l", col = "red", lwd = 2, ylab =          "Price in $", xlab = "Date", xlim = c(2.6, 3.01),  cex=0.8, xaxt="n", ylim = c(95,115)) 
+lines(msft2019TimeSeries, col = "green", lwd=2)
+legend(2.6, 100, legend=c("Stock Prices 2017-2018 (Train)", "Stock Prices 2019 (Test)","Forecasted Price"), col=c("red",        "green", "blue"), lwd=2, box.lty=0, text.font = 4)
+axis(1, at=c(2.6, 2.7, 2.8, 2.9, 3.0), labels=c("09/01/2018","10/01/2018","11/01/2018","12/01/2018","01/01/2019"), las =      1, cex.axis = 1)
+
+plot(forecast, main = "Microsoft Stock Price in 2017 - 2018 & Forecast 2019", type="l", col = "red", lwd = 2, ylab =          "Price in $", xlab = "Date", xlim = c(2.95, 3.015), xaxt="n", ylim = c(95,112))
+lines(msft2019TimeSeries, col = "green", lwd=2)
+legend(2.97, 111, legend=c("Stock Prices 2017-2018 (Train)", "Stock Prices 2019 (Test)","Forecasted Price"), col=c("red",       "green", "blue"), lwd=2,  cex=0.8, box.lty=0, text.font = 4)
+axis(1, at=c(2.95, 2.96, 2.97, 2.98, 2.99, 3.0, 3.01),        
+     labels=c("12/24/2018","12/26/2018","12/27/2018","12/28/2018","12/31/2018","1/1/2019","1/2/2019"), las = 1, cex.axis      = 1)
+
+
+#lines(msft2019TimeSeries, col = "green", lwd=2)
+#legend(2.6, 39, legend=c("Stock Prices 2017-2018 (Train)", "Stock Prices 2019 (Test)","Forecasted Price"), col=c("red", "green", "blue"), lwd=2,  cex=0.8, box.lty=0, text.font = 4)
+#text(seq(1, 20, by=1), -3.7, srt = 60, adj= 1, xpd = TRUE, labels = train$Neighborhood , cex=1.2)
+#axis(1, at=1:5, labels=c("09/01/2018","10/01/2018","11/01/2018","12/01/2018","01/01/2019"), las = 2, cex.axis = 1)
+#axis(1, at=1:5, labels=c("a","b","c","d","e"), las = 1, cex.axis = 3)
+par(op)
+
+?par
+```
+
+Evaluating Residuals
+```{r EvaluatingResiduals, echo=FALSE, message=FALSE}
+Box.test(residuals(model2012),lag = 4, type = "Ljung")
+
+Box.test(residuals(model2017),lag = 4, type = "Ljung")
+```
+The above Ljung-Box test is carried out on residuals to see that after fitting the model what remains is actually the residuals. The test validates the data is independently distributed with a p-value > 0.05.
